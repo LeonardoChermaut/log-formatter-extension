@@ -70,7 +70,7 @@
 
   /**
    * Constrói o elemento <div> correspondente a uma linha formatada.
-   * @param {Array<{ bold: boolean, text: string }>} lineSegments - Segmentos que compõem a linha.
+   * @param {Array<{ bold: boolean, text: string, type?: string }>} lineSegments - Segmentos que compõem a linha.
    * @param {number} lineIndex - Índice sequencial da linha dentro do registro.
    * @returns {HTMLDivElement} Elemento div configurado com estilos adequados.
    */
@@ -83,12 +83,21 @@
       return lineElement;
     }
 
-    const firstSegmentText = lineSegments[0]?.text ?? '';
-    if (firstSegmentText.startsWith('===')) {
+    const firstSegment = lineSegments[0];
+    const lineType = firstSegment?.type;
+
+    if (lineType === 'group-title' || (!lineType && firstSegment?.text?.startsWith('==='))) {
       lineElement.className = 'log-formatter__group-title';
-    } else if (firstSegmentText.startsWith('---') || firstSegmentText.includes('---')) {
+    } else if (
+      lineType === 'separator' ||
+      (!lineType && (firstSegment?.text?.startsWith('---') || firstSegment?.text?.includes('---')))
+    ) {
       lineElement.className = 'log-formatter__separator';
-    } else if (lineIndex === 0 && /^(\(\d+\/\d+\) )?\[/.test(firstSegmentText)) {
+      return lineElement;
+    } else if (
+      lineType === 'header' ||
+      (lineIndex === 0 && /^(\(\d+\/\d+\) )?\[/.test(firstSegment?.text ?? ''))
+    ) {
       lineElement.className = 'log-formatter__header';
     } else {
       lineElement.className = 'log-formatter__line';
@@ -142,8 +151,8 @@
     const toggleButton = document.createElement('button');
     toggleButton.type = 'button';
     toggleButton.className = 'log-formatter__toggle';
-    toggleButton.addEventListener('click', (mouseClickEvent) => {
-      mouseClickEvent.stopPropagation();
+    toggleButton.addEventListener('click', (clickEvent) => {
+      clickEvent.stopPropagation();
       const cellViewState = viewStateByCell.get(cellElement);
       if (cellViewState) {
         showView(cellElement, cellViewState, !cellViewState.isShowingFormatted);
@@ -166,7 +175,6 @@
     const cellTextContent = cellElement.textContent.trim();
 
     if (cellTextContent === '') {
-      cellElement.setAttribute(PROCESSED_ATTRIBUTE, 'pending');
       return;
     }
 

@@ -8,6 +8,7 @@ const {
   parseNestedJson,
   formatTimestamp,
   isDateOrTimeOnly,
+  isNumericArray,
 } = utilities;
 
 /**
@@ -53,125 +54,141 @@ const createEmptyLine = () => {
 };
 
 /**
+ * Cria uma linha separadora visual entre registros consecutivos.
+ * @returns {Array<{ type: string, bold: boolean, text: string }>} Linha separadora estruturada.
+ */
+const createSeparatorLine = () => {
+  return [{ type: 'separator', bold: false, text: '' }];
+};
+
+/**
+ * Renderiza um array preservando formato condensado para primitivos e hierárquico para objetos.
+ * Oculta arrays puramente numéricos (como buffers binários de bytes) para evitar poluição visual.
+ * @param {Array} arrayValue - Array a ser renderizado.
+ * @param {string} indentationSpaces - Espaços de recuo para hierarquia visual.
+ * @returns {Array<Array<{ bold: boolean, text: string }>>} Lista de linhas compostas por segmentos.
+ */
+const renderArrayValue = (arrayValue, indentationSpaces = '') => {
+  if (arrayValue.length === 0) {
+    return [[createTextSegment(`${indentationSpaces}[]`)]];
+  }
+
+  if (isNumericArray(arrayValue)) {
+    return [
+      [
+        createTextSegment(
+          `${indentationSpaces}[dados numéricos ocultados (${arrayValue.length} itens)]`
+        ),
+      ],
+    ];
+  }
+
+  const isAllPrimitiveArray = arrayValue.every((item) => typeof item !== 'object' || item === null);
+
+  if (isAllPrimitiveArray) {
+    const formattedPrimitives = arrayValue
+      .map((primitiveItem) =>
+        typeof primitiveItem === 'string' ? `"${primitiveItem}"` : String(primitiveItem)
+      )
+      .join(', ');
+    return [[createTextSegment(`${indentationSpaces}[${formattedPrimitives}]`)]];
+  }
+
+  const renderedLines = [];
+  arrayValue.forEach((item, index) => {
+    if (typeof item === 'object' && item !== null) {
+      renderedLines.push([createBoldSegment(`${indentationSpaces}[Item ${index + 1}]:`)]);
+      renderedLines.push(...renderComplexValue(item, `${indentationSpaces}  `));
+    } else {
+      renderedLines.push([
+        createBoldSegment(`${indentationSpaces}[Item ${index + 1}]: `),
+        createTextSegment(String(item)),
+      ]);
+    }
+  });
+
+  return renderedLines;
+};
+
+/**
+ * Renderiza entradas de um objeto, tratando buffers e arrays aninhados.
+ * @param {Object} objectValue - Objeto a ser renderizado.
+ * @param {string} indentationSpaces - Espaços de recuo para hierarquia visual.
+ * @returns {Array<Array<{ bold: boolean, text: string }>>} Lista de linhas compostas por segmentos.
+ */
+const renderObjectValue = (objectValue, indentationSpaces = '') => {
+  const objectEntries = Object.entries(objectValue);
+  if (objectEntries.length === 0) {
+    return [[createTextSegment(`${indentationSpaces}{}`)]];
+  }
+
+  const renderedLines = [];
+  objectEntries.forEach(([originalKey, propertyValue]) => {
+    if (
+      propertyValue !== null &&
+      typeof propertyValue === 'object' &&
+      propertyValue.type === 'Buffer' &&
+      Array.isArray(propertyValue.data)
+    ) {
+      renderedLines.push([
+        createBoldSegment(`${indentationSpaces}${originalKey}: `),
+        createTextSegment(`[Buffer binário ocultado (${propertyValue.data.length} bytes)]`),
+      ]);
+      return;
+    }
+
+    if (isNumericArray(propertyValue)) {
+      renderedLines.push([
+        createBoldSegment(`${indentationSpaces}${originalKey}: `),
+        createTextSegment(`[dados numéricos ocultados (${propertyValue.length} itens)]`),
+      ]);
+      return;
+    }
+
+    if (propertyValue !== null && typeof propertyValue === 'object') {
+      renderedLines.push([createBoldSegment(`${indentationSpaces}${originalKey}:`)]);
+      renderedLines.push(...renderComplexValue(propertyValue, `${indentationSpaces}  `));
+    } else {
+      const stringifiedValue = String(propertyValue ?? '');
+      if (stringifiedValue.includes('\n')) {
+        renderedLines.push([createBoldSegment(`${indentationSpaces}${originalKey}:`)]);
+        stringifiedValue.split('\n').forEach((textLine) => {
+          renderedLines.push([createTextSegment(`${indentationSpaces}  ${textLine}`)]);
+        });
+      } else {
+        renderedLines.push([
+          createBoldSegment(`${indentationSpaces}${originalKey}: `),
+          createTextSegment(stringifiedValue),
+        ]);
+      }
+    }
+  });
+
+  return renderedLines;
+};
+
+/**
  * Renderiza recursivamente estruturas complexas (objetos, arrays e strings com quebras de linha),
  * preservando as chaves originais exatas em negrito e os valores em formato legível, sem truncar.
- * Oculta arrays puramente numéricos (como buffers binários de bytes) para evitar poluição visual.
  * @param {*} valueToRender - Valor a ser renderizado hierarquicamente.
  * @param {string} indentationSpaces - Espaços de recuo para hierarquia visual.
  * @returns {Array<Array<{ bold: boolean, text: string }>>} Lista de linhas compostas por segmentos.
  */
 const renderComplexValue = (valueToRender, indentationSpaces = '') => {
-  const renderedLines = [];
-
   if (valueToRender === null || valueToRender === undefined) {
     return [[createTextSegment(`${indentationSpaces}null`)]];
   }
 
   if (typeof valueToRender === 'object') {
     if (Array.isArray(valueToRender)) {
-      if (valueToRender.length === 0) {
-        return [[createTextSegment(`${indentationSpaces}[]`)]];
-      }
-
-      const isOnlyNumbersOnDataProperty = valueToRender.every(
-        (property) => typeof property === 'number'
-      );
-
-      if (isOnlyNumbersOnDataProperty) {
-        return [
-          [
-            createTextSegment(
-              `${indentationSpaces}[dados numéricos ocultados (${valueToRender.length} itens)]`
-            ),
-          ],
-        ];
-      }
-
-      const isAllPrimitiveArray = valueToRender.every(
-        (property) => typeof property !== 'object' || property === null
-      );
-
-      if (isAllPrimitiveArray) {
-        const formattedPrimitives = valueToRender
-          .map((primitiveItem) =>
-            typeof primitiveItem === 'string' ? `"${primitiveItem}"` : String(primitiveItem)
-          )
-          .join(', ');
-        return [[createTextSegment(`${indentationSpaces}[${formattedPrimitives}]`)]];
-      }
-
-      valueToRender.forEach((property, index) => {
-        if (typeof property === 'object' && property !== null) {
-          renderedLines.push([createBoldSegment(`${indentationSpaces}[Item ${index + 1}]:`)]);
-          renderedLines.push(...renderComplexValue(property, `${indentationSpaces}  `));
-        } else {
-          renderedLines.push([
-            createBoldSegment(`${indentationSpaces}[Item ${index + 1}]: `),
-            createTextSegment(String(property)),
-          ]);
-        }
-      });
-      return renderedLines;
+      return renderArrayValue(valueToRender, indentationSpaces);
     }
-
-    const objectEntries = Object.entries(valueToRender);
-    if (objectEntries.length === 0) {
-      return [[createTextSegment(`${indentationSpaces}{}`)]];
-    }
-
-    objectEntries.forEach(([originalKey, propertyValue]) => {
-      if (
-        propertyValue !== null &&
-        typeof propertyValue === 'object' &&
-        propertyValue.type === 'Buffer' &&
-        Array.isArray(propertyValue.data)
-      ) {
-        renderedLines.push([
-          createBoldSegment(`${indentationSpaces}${originalKey}: `),
-          createTextSegment(`[Buffer binário ocultado (${propertyValue.data.length} bytes)]`),
-        ]);
-        return;
-      }
-
-      if (Array.isArray(propertyValue)) {
-        const isOnlyNumbersOnDataProperty =
-          propertyValue.length > 0 &&
-          propertyValue.every((property) => {
-            return typeof property === 'number';
-          });
-
-        if (isOnlyNumbersOnDataProperty) {
-          renderedLines.push([
-            createBoldSegment(`${indentationSpaces}${originalKey}: `),
-            createTextSegment(`[dados numéricos ocultados (${propertyValue.length} itens)]`),
-          ]);
-          return;
-        }
-      }
-
-      if (propertyValue !== null && typeof propertyValue === 'object') {
-        renderedLines.push([createBoldSegment(`${indentationSpaces}${originalKey}:`)]);
-        renderedLines.push(...renderComplexValue(propertyValue, `${indentationSpaces}  `));
-      } else {
-        const stringifiedValue = String(propertyValue ?? '');
-        if (stringifiedValue.includes('\n')) {
-          renderedLines.push([createBoldSegment(`${indentationSpaces}${originalKey}:`)]);
-          stringifiedValue.split('\n').forEach((textLine) => {
-            renderedLines.push([createTextSegment(`${indentationSpaces}  ${textLine}`)]);
-          });
-        } else {
-          renderedLines.push([
-            createBoldSegment(`${indentationSpaces}${originalKey}: `),
-            createTextSegment(stringifiedValue),
-          ]);
-        }
-      }
-    });
-    return renderedLines;
+    return renderObjectValue(valueToRender, indentationSpaces);
   }
 
   const stringValue = String(valueToRender);
   if (stringValue.includes('\n')) {
+    const renderedLines = [];
     stringValue.split('\n').forEach((textLine) => {
       renderedLines.push([createTextSegment(`${indentationSpaces}${textLine}`)]);
     });
@@ -235,9 +252,9 @@ const parseContextLiteral = (contextFieldText) => {
   const objectPattern = new RegExp(`^\\s*'?([\\w$-]+)'?: ${valuePattern}`, 'gm');
 
   const createEntry = (matchedGroup) => {
-    const [, propertyKey, matchedValue, unMatchedValue] = matchedGroup;
+    const [, propertyKey, matchedValue, unquotedValue] = matchedGroup;
     const propertyValue =
-      matchedValue !== undefined ? unescapeJavaScriptString(matchedValue) : unMatchedValue.trim();
+      matchedValue !== undefined ? unescapeJavaScriptString(matchedValue) : unquotedValue.trim();
     return [propertyKey, propertyValue];
   };
 
@@ -265,27 +282,30 @@ const NESTJS_KNOWN_FIELDS = [
 
 /**
  * Localiza e divide as posições dos campos do formato inspecionado do NestJS.
+ * Identifica cada campo independentemente da ordem em que aparecem no payload
+ * e divide os segmentos ordenados pela posição de início no texto.
  * @param {string} entryRawText - Texto completo do registro NestJS.
  * @returns {Object<string, string>} Mapa de campos brutos separados.
  */
 const splitNestjsFields = (entryRawText) => {
   const detectedFieldPositions = [];
-  let currentSearchPosition = 0;
 
   NESTJS_KNOWN_FIELDS.forEach((fieldName) => {
     const fieldSearchPattern = new RegExp(`(?:^|[\\s{,])${fieldName}: `, 'g');
-    fieldSearchPattern.lastIndex = currentSearchPosition;
     const matchResult = fieldSearchPattern.exec(entryRawText);
     if (matchResult) {
       const valueStartIndex = matchResult.index + matchResult[0].length;
       detectedFieldPositions.push({
         fieldName,
-        keyStartIndex: valueStartIndex - fieldName.length - 2,
+        keyStartIndex: matchResult.index,
         valueStartIndex,
       });
-      currentSearchPosition = valueStartIndex;
     }
   });
+
+  detectedFieldPositions.sort(
+    (firstField, secondField) => firstField.valueStartIndex - secondField.valueStartIndex
+  );
 
   const extractedFieldMap = {};
   detectedFieldPositions.forEach(({ fieldName, valueStartIndex }, indexPosition) => {
@@ -465,7 +485,10 @@ const formatNestjsEntry = (logEntry) => {
     .join(' ');
 
   formattedLines.push([
-    createBoldSegment(`[${levelDescription}]`),
+    {
+      type: 'header',
+      ...createBoldSegment(`[${levelDescription}]`),
+    },
     createTextSegment(
       ` ${formattedDateTime}${applicationDetails ? ` | ${applicationDetails}` : ''}`
     ),
@@ -487,35 +510,35 @@ const formatNestjsEntry = (logEntry) => {
     }
   }
 
-  const originMetadataLines = [];
+  const sourceMetadataLines = [];
   if (logEntry.logger) {
-    originMetadataLines.push([createBoldSegment('Serviço: '), createTextSegment(logEntry.logger)]);
+    sourceMetadataLines.push([createBoldSegment('service: '), createTextSegment(logEntry.logger)]);
   }
   if (logEntry.source) {
-    originMetadataLines.push([createBoldSegment('Arquivo: '), createTextSegment(logEntry.source)]);
+    sourceMetadataLines.push([createBoldSegment('file: '), createTextSegment(logEntry.source)]);
   }
   if (logEntry.traceId) {
-    originMetadataLines.push([
-      createBoldSegment('Identificador de rastreio (traceId): '),
+    sourceMetadataLines.push([
+      createBoldSegment('traceId: '),
       createTextSegment(logEntry.traceId),
     ]);
   }
   if (logEntry.trace) {
-    originMetadataLines.push([
+    sourceMetadataLines.push([
       createBoldSegment('Marcador (trace): '),
       createTextSegment(logEntry.trace),
     ]);
   }
   if (logEntry.omittedCount > 0) {
-    originMetadataLines.push([
+    sourceMetadataLines.push([
       createBoldSegment('Mensagem truncada no Kibana: '),
       createTextSegment(`${logEntry.omittedCount.toLocaleString('pt-BR')} caracteres omitidos`),
     ]);
   }
 
-  if (originMetadataLines.length > 0) {
+  if (sourceMetadataLines.length > 0) {
     formattedLines.push(createEmptyLine(), [createBoldSegment('Origem do log')]);
-    formattedLines.push(...originMetadataLines);
+    formattedLines.push(...sourceMetadataLines);
   }
 
   if (logEntry.context && typeof logEntry.context === 'object') {
@@ -547,7 +570,10 @@ const formatNestjsEntry = (logEntry) => {
 const formatSkywalkingEntry = (logEntry) => {
   const formattedLines = [
     [
-      createBoldSegment(`[${LOG_LEVEL[logEntry.level] ?? 'ERRO'}]`),
+      {
+        type: 'header',
+        ...createBoldSegment(`[${LOG_LEVEL[logEntry.level] ?? 'ERRO'}]`),
+      },
       createTextSegment(' Agente Skywalking'),
     ],
     createEmptyLine(),
@@ -580,6 +606,7 @@ const formatSkywalkingEntry = (logEntry) => {
 
 /**
  * Formata um registro do Filebeat / Kubernetes preservando as chaves originais.
+ * Expande valores que contenham JSON aninhado via parseNestedJson e renderComplexValue.
  * @param {Object} logEntry - Registro com campos do Filebeat.
  * @returns {Array<Array<{ bold: boolean, text: string }>>} Linhas formatadas.
  */
@@ -595,12 +622,30 @@ const formatFilebeatEntry = (logEntry) => {
 
   const formattedLines = [];
   if (headerText) {
-    formattedLines.push([createBoldSegment(`[${headerText}]`)]);
+    formattedLines.push([{ type: 'header', ...createBoldSegment(`[${headerText}]`) }]);
   }
   formattedLines.push(createEmptyLine());
 
   Object.entries(logEntry.fields).forEach(([originalKey, propertyValue]) => {
-    formattedLines.push([createBoldSegment(`${originalKey}: `), createTextSegment(propertyValue)]);
+    const parsedJsonCandidate = tryParseJson(propertyValue);
+    if (parsedJsonCandidate !== undefined) {
+      const expandedValue = parseNestedJson(parsedJsonCandidate);
+      formattedLines.push([createBoldSegment(`${originalKey}:`)]);
+      formattedLines.push(...renderComplexValue(expandedValue, '  '));
+    } else {
+      const stringifiedValue = String(propertyValue ?? '');
+      if (stringifiedValue.includes('\n')) {
+        formattedLines.push([createBoldSegment(`${originalKey}:`)]);
+        stringifiedValue.split('\n').forEach((textLine) => {
+          formattedLines.push([createTextSegment(`  ${textLine}`)]);
+        });
+      } else {
+        formattedLines.push([
+          createBoldSegment(`${originalKey}: `),
+          createTextSegment(stringifiedValue),
+        ]);
+      }
+    }
   });
 
   return formattedLines;
@@ -657,17 +702,18 @@ const formatTraceGroup = ([traceIdentifier, groupEntries]) => {
       ? `${groupEntries.length} registro(s)`
       : `traceId ${traceIdentifier}`;
 
-  const renderedGroupLines = [[createBoldSegment(groupTitle)]];
+  const renderedGroupLines = [[{ type: 'group-title', bold: true, text: groupTitle }]];
 
   groupEntries.forEach((logEntry, entryIndex) => {
     if (entryIndex > 0) {
-      renderedGroupLines.push([createTextSegment('\n----------------------------------------\n')]);
+      renderedGroupLines.push(createSeparatorLine());
     }
     const singleEntryLines = formatLogEntry(logEntry);
     const orderPrefix =
       groupEntries.length > 1 ? `(${entryIndex + 1}/${groupEntries.length}) ` : '';
+    const firstLineSegments = singleEntryLines[0] ?? [createTextSegment('')];
     renderedGroupLines.push(
-      [createTextSegment(orderPrefix), ...(singleEntryLines[0] ?? [createTextSegment('')])],
+      [{ type: 'header', ...createTextSegment(orderPrefix) }, ...firstLineSegments],
       ...singleEntryLines.slice(1)
     );
   });
@@ -685,7 +731,7 @@ const formatLogEntries = (logEntries) => {
 
   groupEntriesByTraceId(logEntries).forEach((logGroup, groupIndex) => {
     if (groupIndex > 0) {
-      renderedOutput.push([createTextSegment('\n\n')]);
+      renderedOutput.push(createEmptyLine(), createEmptyLine());
     }
     renderedOutput.push(...formatTraceGroup(logGroup));
   });

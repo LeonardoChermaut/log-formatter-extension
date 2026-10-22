@@ -209,12 +209,28 @@
     return false;
   };
 
+  /**
+   * Verifica se o valor é um array não vazio composto exclusivamente por números.
+   * Utilizado para identificar buffers binários ou sequências numéricas que não agregam
+   * valor legível direto aos logs e devem ser sumarizados visualmente.
+   * @param {*} candidateArray - Valor a ser verificado.
+   * @returns {boolean} Verdadeiro se for um array não vazio apenas com números.
+   */
+  const isNumericArray = (candidateArray) => {
+    return (
+      Array.isArray(candidateArray) &&
+      candidateArray.length > 0 &&
+      candidateArray.every((item) => typeof item === 'number')
+    );
+  };
+
   const utilities = {
     tryParseJson,
     unescapeJavaScriptString,
     parseNestedJson,
     formatTimestamp,
     isDateOrTimeOnly,
+    isNumericArray,
   };
 
   globalThis.LogFormatter = globalThis.LogFormatter || {};
