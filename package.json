@@ -1,0 +1,25 @@
+{
+  "name": "log-formatter-extension",
+  "version": "1.0.0",
+  "description": "Extensão para navegadores Chromium (Google Chrome, Microsoft Edge, Brave, etc.) que formata e organiza automaticamente os logs na tabela do **Discover** do Kibana.",
+  "main": "src/content/content.js",
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepare": "husky"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.13.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.9.10"
+  }
+}

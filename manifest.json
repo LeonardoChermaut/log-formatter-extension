@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Formatador de Logs do Kibana",
+  "version": "1.0.0",
+  "description": "Formata automaticamente os logs da tabela do Discover em seções organizadas.",
+  "content_scripts": [
+    {
+      "matches": ["https://kibana.eks.tools.fastshopdigital.com/*"],
+      "js": [
+        "src/utils/utilities.js",
+        "src/formatters/formatLogEntry.js",
+        "src/content/content.js"
+      ],
+      "css": ["src/content/content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

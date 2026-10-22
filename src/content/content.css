@@ -1,0 +1,96 @@
+/* Libera a altura e quebras de linha das células de log formatadas no Discover do Kibana */
+.truncate-by-height.log-formatter-cell {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+  overflow: visible !important;
+  max-height: none !important;
+  height: auto !important;
+  -webkit-line-clamp: unset !important;
+}
+
+/* Contêiner raiz da visualização formatada */
+.log-formatter {
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
+  font-size: 14.5px;
+  line-height: 1.65;
+  font-weight: 400 !important;
+  user-select: text;
+  cursor: text;
+}
+
+/* Preserva quebras de linha e indentação */
+.log-formatter > div {
+  white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Garante estritamente que linhas, divs e valores tenham peso de fonte normal (400) */
+.log-formatter div,
+.log-formatter span,
+.log-formatter__line,
+.log-formatter__value {
+  font-weight: 400 !important;
+}
+
+/* SOMENTE as chaves originais, identificadores e títulos destacados ficam em negrito (700) */
+.log-formatter .log-formatter__bold {
+  font-weight: 700 !important;
+}
+
+/* Linha de conteúdo com valor legível em estilo normal */
+.log-formatter__line {
+  padding-left: 2px;
+}
+
+/* Valor de campo com fonte normal legível */
+.log-formatter__value {
+  color: inherit;
+}
+
+/* Título de agrupamento por traceId */
+.log-formatter__group-title {
+  font-size: 15px;
+  padding: 6px 8px;
+  margin: 10px 0 6px 0;
+  border-bottom: 2px solid rgba(127, 127, 127, 0.45);
+}
+
+/* Linha separadora horizontal entre registros consecutivos */
+.log-formatter__separator {
+  height: 1px;
+  margin: 12px 0;
+  background: rgba(127, 127, 127, 0.35);
+  font-size: 0;
+}
+
+/* Cabeçalho do registro de log — [NÍVEL] data e hora | aplicação (ambiente) */
+.log-formatter__header {
+  font-size: 15px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.2);
+  margin-bottom: 6px;
+}
+
+/* Botão para alternar entre a exibição formatada e a original */
+.log-formatter__toggle {
+  float: right;
+  margin: 0 0 6px 10px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 600 !important;
+  color: inherit;
+  background: transparent;
+  border: 1px solid rgba(127, 127, 127, 0.6);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.log-formatter__toggle:hover {
+  background: rgba(127, 127, 127, 0.25);
+}
