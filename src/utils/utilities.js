@@ -1,4 +1,22 @@
 (() => {
+  const FILTER_DEFINITIONS = [
+    { id: 'null', label: 'Valores nulos (null, undefined)' },
+    { id: 'emptyString', label: 'Strings vazias ("")' },
+    { id: 'false', label: 'Valores falsos (false)' },
+    { id: 'emptyArray', label: 'Arrays vazios ([], ["", ""])' },
+    { id: 'emptyObject', label: 'Objetos vazios ({})' },
+  ];
+
+  const DEFAULT_FILTER_OPTIONS = {
+    null: false,
+    emptyString: false,
+    false: false,
+    emptyArray: false,
+    emptyObject: false,
+  };
+
+  const FILTER_STORAGE_KEY = 'kibana_log_formatter_filters';
+
   /**
    * Tenta converter uma string JSON em um objeto JavaScript. Se a string estiver
    * incompleta ou truncada (como ocorre comumente no Kibana com limites de caracteres),
@@ -224,6 +242,173 @@
     );
   };
 
+  /**
+   * Verifica se o valor é nulo ou indefinido.
+   * @param {*} candidateValue - Valor a ser avaliado.
+   * @returns {boolean} Verdadeiro se for null ou undefined.
+   */
+  const isNullOrUndefined = (candidateValue) =>
+    candidateValue === null || candidateValue === undefined;
+
+  /**
+   * Verifica se o valor é uma string vazia ou composta exclusivamente por espaços em branco.
+   * @param {*} candidateValue - Valor a ser avaliado.
+   * @returns {boolean} Verdadeiro se for string vazia.
+   */
+  const isEmptyString = (candidateValue) =>
+    typeof candidateValue === 'string' && candidateValue.trim() === '';
+
+  /**
+   * Verifica se o valor é estritamente o booleano false.
+   * @param {*} candidateValue - Valor a ser avaliado.
+   * @returns {boolean} Verdadeiro se for estritamente false.
+   */
+  const isFalse = (candidateValue) => candidateValue === false;
+
+  /**
+   * Verifica se o valor é um array vazio ou se contém exclusivamente itens vazios/nulos (ex: [], ["", ""]).
+   * @param {*} candidateValue - Valor a ser avaliado.
+   * @returns {boolean} Verdadeiro se o array não contiver conteúdo significativo.
+   */
+  const isEmptyArray = (candidateValue) => {
+    if (!Array.isArray(candidateValue)) {
+      return false;
+    }
+    if (candidateValue.length === 0) {
+      return true;
+    }
+    return candidateValue.every((item) => {
+      if (isNullOrUndefined(item)) {
+        return true;
+      }
+      if (isEmptyString(item)) {
+        return true;
+      }
+      return false;
+    });
+  };
+
+  /**
+   * Verifica se o valor é um objeto literal vazio (sem chaves próprias).
+   * @param {*} candidateValue - Valor a ser avaliado.
+   * @returns {boolean} Verdadeiro se for objeto sem propriedades.
+   */
+  const isEmptyObject = (candidateValue) => {
+    if (
+      candidateValue === null ||
+      typeof candidateValue !== 'object' ||
+      Array.isArray(candidateValue)
+    ) {
+      return false;
+    }
+    return Object.keys(candidateValue).length === 0;
+  };
+
+  /**
+   * Determina se um valor primitivo ou estrutural deve ser filtrado conforme as opções ativas.
+   * @param {*} candidateValue - Valor a ser verificado.
+   * @param {Object<string, boolean>} activeFilters - Mapa de filtros ativos.
+   * @returns {boolean} Verdadeiro se o valor deve ser removido.
+   */
+  const shouldFilterValue = (candidateValue, activeFilters = {}) => {
+    if (!activeFilters) {
+      return false;
+    }
+    if (activeFilters.null && isNullOrUndefined(candidateValue)) {
+      return true;
+    }
+    if (activeFilters.emptyString && isEmptyString(candidateValue)) {
+      return true;
+    }
+    if (activeFilters.false && isFalse(candidateValue)) {
+      return true;
+    }
+    if (activeFilters.emptyArray && isEmptyArray(candidateValue)) {
+      return true;
+    }
+    if (activeFilters.emptyObject && isEmptyObject(candidateValue)) {
+      return true;
+    }
+    return false;
+  };
+
+  /**
+   * Percorre recursivamente um objeto ou array e remove campos que correspondam aos filtros ativos.
+   * Retorna uma nova estrutura sem mutar os dados originais.
+   * @param {*} dataToPrune - Objeto, array ou valor primitivo a ser podado.
+   * @param {Object<string, boolean>} activeFilters - Mapa com flags de filtros ativos.
+   * @returns {*} Nova estrutura limpa com os campos filtrados removidos.
+   */
+  const pruneLogData = (dataToPrune, activeFilters = {}) => {
+    if (!activeFilters || !Object.values(activeFilters).some(Boolean)) {
+      return dataToPrune;
+    }
+
+    if (shouldFilterValue(dataToPrune, activeFilters)) {
+      return undefined;
+    }
+
+    if (Array.isArray(dataToPrune)) {
+      const prunedArray = dataToPrune
+        .map((arrayItem) => pruneLogData(arrayItem, activeFilters))
+        .filter((arrayItem) => arrayItem !== undefined);
+
+      if (activeFilters.emptyArray && (prunedArray.length === 0 || isEmptyArray(prunedArray))) {
+        return undefined;
+      }
+      return prunedArray;
+    }
+
+    if (dataToPrune !== null && typeof dataToPrune === 'object') {
+      const prunedObject = {};
+      for (const [propertyKey, propertyValue] of Object.entries(dataToPrune)) {
+        const prunedPropertyValue = pruneLogData(propertyValue, activeFilters);
+        if (prunedPropertyValue !== undefined) {
+          prunedObject[propertyKey] = prunedPropertyValue;
+        }
+      }
+
+      if (activeFilters.emptyObject && Object.keys(prunedObject).length === 0) {
+        return undefined;
+      }
+      return prunedObject;
+    }
+
+    return dataToPrune;
+  };
+
+  /**
+   * Carrega as preferências de filtro salvas no localStorage ou retorna as padrões.
+   * @returns {Object<string, boolean>} Objeto com o estado de cada filtro.
+   */
+  const loadFilterPreferences = () => {
+    try {
+      if (typeof localStorage === 'undefined') {
+        return { ...DEFAULT_FILTER_OPTIONS };
+      }
+      const rawStoredValue = localStorage.getItem(FILTER_STORAGE_KEY);
+      if (!rawStoredValue) {
+        return { ...DEFAULT_FILTER_OPTIONS };
+      }
+      const parsedFilters = JSON.parse(rawStoredValue);
+      return { ...DEFAULT_FILTER_OPTIONS, ...parsedFilters };
+    } catch {
+      return { ...DEFAULT_FILTER_OPTIONS };
+    }
+  };
+
+  /**
+   * Salva as preferências de filtro no localStorage.
+   * @param {Object<string, boolean>} filterPreferences - Mapa de filtros a persistir.
+   */
+  const saveFilterPreferences = (filterPreferences) => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(filterPreferences));
+      }
+    } catch {}
+  };
+
   const utilities = {
     tryParseJson,
     unescapeJavaScriptString,
@@ -231,6 +416,18 @@
     formatTimestamp,
     isDateOrTimeOnly,
     isNumericArray,
+    isNullOrUndefined,
+    isEmptyString,
+    isFalse,
+    isEmptyArray,
+    isEmptyObject,
+    shouldFilterValue,
+    pruneLogData,
+    FILTER_DEFINITIONS,
+    DEFAULT_FILTER_OPTIONS,
+    FILTER_STORAGE_KEY,
+    loadFilterPreferences,
+    saveFilterPreferences,
   };
 
   globalThis.LogFormatter = globalThis.LogFormatter || {};

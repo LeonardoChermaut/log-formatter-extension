@@ -11,6 +11,7 @@
   const LABEL_SHOW_FORMATTED = 'Ver formatado';
 
   const viewStateByCell = new WeakMap();
+  const formattedCells = new Set();
 
   const logFormatterApi =
     globalThis.logFormatterApi ||
@@ -20,7 +21,14 @@
     (typeof require !== 'undefined' ? require('../utils/utilities.js') : {});
 
   const { parseRawLogText, formatLogEntries } = logFormatterApi;
-  const { isDateOrTimeOnly } = utilities;
+  const {
+    isDateOrTimeOnly,
+    FILTER_DEFINITIONS = [],
+    loadFilterPreferences,
+    saveFilterPreferences,
+  } = utilities;
+
+  const activeFilters = typeof loadFilterPreferences === 'function' ? loadFilterPreferences() : {};
 
   /**
    * Verifica se a URL atual pertence à seção do Discover do Kibana.
@@ -135,22 +143,219 @@
       ? cellViewState.formattedNodes
       : cellViewState.originalNodes;
 
-    cellElement.replaceChildren(cellViewState.toggleButton, ...nodesToDisplay);
+    cellElement.replaceChildren(cellViewState.toolbarElement, ...nodesToDisplay);
     cellViewState.toggleButton.textContent = shouldShowFormatted
       ? LABEL_SHOW_ORIGINAL
       : LABEL_SHOW_FORMATTED;
+
+    cellViewState.filterWrapper.style.display = shouldShowFormatted ? '' : 'none';
+    if (!shouldShowFormatted) {
+      cellViewState.filterMenu.classList.remove('log-formatter__filter-menu--open');
+    }
     cellViewState.isShowingFormatted = shouldShowFormatted;
   };
 
   /**
-   * Cria o botão que permite ao desenvolvedor alternar entre a exibição formatada e o texto bruto.
-   * @param {HTMLElement} cellElement - Célula onde o botão será inserido.
-   * @returns {HTMLButtonElement} Botão configurado com listener de clique.
+   * Gera o rótulo do botão de filtros com o contador de filtros ativos.
+   * @param {Object<string, boolean>} filters - Filtros ativos.
+   * @returns {string} Rótulo formatado.
    */
-  const buildToggleButton = (cellElement) => {
+  const getFilterButtonLabel = (filters) => {
+    const activeCount = FILTER_DEFINITIONS.filter((def) => filters[def.id]).length;
+    return activeCount > 0 ? `Filtros (${activeCount}) ▾` : 'Filtros ▾';
+  };
+
+  /**
+   * Sincroniza o estado visual das caixas de seleção de um menu de filtros aberto.
+   * @param {HTMLElement} menuElement - Elemento do menu dropdown.
+   */
+  const syncFilterMenuCheckboxes = (menuElement) => {
+    if (!menuElement) {
+      return;
+    }
+
+    const masterCheckbox = menuElement.querySelector('.log-formatter__master-checkbox');
+    const allItemCheckboxes = menuElement.querySelectorAll('.log-formatter__item-checkbox');
+
+    const allChecked =
+      FILTER_DEFINITIONS.length > 0 &&
+      FILTER_DEFINITIONS.every((filterDef) => activeFilters[filterDef.id]);
+    const anyChecked = FILTER_DEFINITIONS.some((filterDef) => activeFilters[filterDef.id]);
+
+    if (masterCheckbox) {
+      masterCheckbox.checked = allChecked;
+      masterCheckbox.indeterminate = anyChecked && !allChecked;
+    }
+
+    allItemCheckboxes.forEach((checkboxElement) => {
+      const filterId = checkboxElement.getAttribute('data-filter-id');
+      if (filterId) {
+        checkboxElement.checked = Boolean(activeFilters[filterId]);
+      }
+    });
+  };
+
+  /**
+   * Atualiza a renderização de todas as células formatadas registradas na tela
+   * aplicando as novas configurações de filtro persistidas.
+   */
+  const updateAllCells = () => {
+    if (typeof saveFilterPreferences === 'function') {
+      saveFilterPreferences(activeFilters);
+    }
+
+    formattedCells.forEach((cellElement) => {
+      if (!document.body || !document.body.contains(cellElement)) {
+        formattedCells.delete(cellElement);
+        return;
+      }
+
+      const cellViewState = viewStateByCell.get(cellElement);
+      if (!cellViewState) {
+        return;
+      }
+
+      if (cellViewState.filterButton) {
+        cellViewState.filterButton.textContent = getFilterButtonLabel(activeFilters);
+        const activeCount = FILTER_DEFINITIONS.filter((def) => activeFilters[def.id]).length;
+        if (activeCount > 0) {
+          cellViewState.filterButton.classList.add('log-formatter__btn--active');
+        } else {
+          cellViewState.filterButton.classList.remove('log-formatter__btn--active');
+        }
+      }
+
+      syncFilterMenuCheckboxes(cellViewState.filterMenu);
+
+      if (cellViewState.isShowingFormatted) {
+        const formattedLineSegments = formatLogEntries(
+          cellViewState.parsedLogEntries,
+          activeFilters
+        );
+        cellViewState.formattedNodes = [buildFormattedView(formattedLineSegments)];
+        showView(cellElement, cellViewState, true);
+      }
+    });
+  };
+
+  /**
+   * Constrói o menu popover com as opções de filtragem de campos vazios.
+   * @returns {{ filterWrapper: HTMLElement, filterButton: HTMLElement, filterMenu: HTMLElement }} Elementos criados.
+   */
+  const buildFilterDropdown = () => {
+    const filterWrapper = document.createElement('div');
+    filterWrapper.className = 'log-formatter__filter-wrapper';
+
+    const filterButton = document.createElement('button');
+    filterButton.type = 'button';
+    filterButton.className = 'log-formatter__btn';
+    filterButton.textContent = getFilterButtonLabel(activeFilters);
+
+    const activeCount = FILTER_DEFINITIONS.filter((def) => activeFilters[def.id]).length;
+    if (activeCount > 0) {
+      filterButton.classList.add('log-formatter__btn--active');
+    }
+
+    const filterMenu = document.createElement('div');
+    filterMenu.className = 'log-formatter__filter-menu';
+
+    const headerElement = document.createElement('div');
+    headerElement.className = 'log-formatter__filter-header';
+    headerElement.textContent = 'Ocultar campos vazios';
+    filterMenu.appendChild(headerElement);
+
+    const masterOptionLabel = document.createElement('label');
+    masterOptionLabel.className = 'log-formatter__filter-item';
+
+    const masterCheckbox = document.createElement('input');
+    masterCheckbox.type = 'checkbox';
+    masterCheckbox.className = 'log-formatter__master-checkbox';
+    const allChecked =
+      FILTER_DEFINITIONS.length > 0 &&
+      FILTER_DEFINITIONS.every((filterDef) => activeFilters[filterDef.id]);
+    const anyChecked = FILTER_DEFINITIONS.some((filterDef) => activeFilters[filterDef.id]);
+    masterCheckbox.checked = allChecked;
+    masterCheckbox.indeterminate = anyChecked && !allChecked;
+
+    masterCheckbox.addEventListener('change', (changeEvent) => {
+      changeEvent.stopPropagation();
+      const shouldCheckAll = masterCheckbox.checked;
+      FILTER_DEFINITIONS.forEach((filterDef) => {
+        activeFilters[filterDef.id] = shouldCheckAll;
+      });
+      updateAllCells();
+    });
+
+    const masterLabelText = document.createElement('span');
+    masterLabelText.textContent = 'Selecionar todos';
+    masterOptionLabel.appendChild(masterCheckbox);
+    masterOptionLabel.appendChild(masterLabelText);
+    filterMenu.appendChild(masterOptionLabel);
+
+    const dividerElement = document.createElement('div');
+    dividerElement.className = 'log-formatter__filter-divider';
+    filterMenu.appendChild(dividerElement);
+
+    FILTER_DEFINITIONS.forEach((filterDefinition) => {
+      const optionLabel = document.createElement('label');
+      optionLabel.className = 'log-formatter__filter-item';
+
+      const optionCheckbox = document.createElement('input');
+      optionCheckbox.type = 'checkbox';
+      optionCheckbox.className = 'log-formatter__item-checkbox';
+      optionCheckbox.setAttribute('data-filter-id', filterDefinition.id);
+      optionCheckbox.checked = Boolean(activeFilters[filterDefinition.id]);
+
+      optionCheckbox.addEventListener('change', (changeEvent) => {
+        changeEvent.stopPropagation();
+        activeFilters[filterDefinition.id] = optionCheckbox.checked;
+        updateAllCells();
+      });
+
+      const optionLabelText = document.createElement('span');
+      optionLabelText.textContent = filterDefinition.label;
+
+      optionLabel.appendChild(optionCheckbox);
+      optionLabel.appendChild(optionLabelText);
+      filterMenu.appendChild(optionLabel);
+    });
+
+    filterButton.addEventListener('click', (clickEvent) => {
+      clickEvent.stopPropagation();
+      const isAlreadyOpen = filterMenu.classList.contains('log-formatter__filter-menu--open');
+      document.querySelectorAll('.log-formatter__filter-menu--open').forEach((openMenuElement) => {
+        openMenuElement.classList.remove('log-formatter__filter-menu--open');
+      });
+
+      if (!isAlreadyOpen) {
+        syncFilterMenuCheckboxes(filterMenu);
+        filterMenu.classList.add('log-formatter__filter-menu--open');
+      }
+    });
+
+    filterWrapper.appendChild(filterButton);
+    filterWrapper.appendChild(filterMenu);
+
+    return {
+      filterWrapper,
+      filterButton,
+      filterMenu,
+    };
+  };
+
+  /**
+   * Constrói a barra de ferramentas contendo o botão de alternância e o menu de filtros.
+   * @param {HTMLElement} cellElement - Célula onde a barra será inserida.
+   * @returns {Object} Componentes da barra de ferramentas.
+   */
+  const buildToolbar = (cellElement) => {
+    const toolbarElement = document.createElement('div');
+    toolbarElement.className = 'log-formatter__toolbar';
+
     const toggleButton = document.createElement('button');
     toggleButton.type = 'button';
     toggleButton.className = 'log-formatter__toggle';
+    toggleButton.textContent = LABEL_SHOW_ORIGINAL;
     toggleButton.addEventListener('click', (clickEvent) => {
       clickEvent.stopPropagation();
       const cellViewState = viewStateByCell.get(cellElement);
@@ -159,7 +364,18 @@
       }
     });
 
-    return toggleButton;
+    const { filterWrapper, filterButton, filterMenu } = buildFilterDropdown();
+
+    toolbarElement.appendChild(filterWrapper);
+    toolbarElement.appendChild(toggleButton);
+
+    return {
+      toolbarElement,
+      toggleButton,
+      filterWrapper,
+      filterButton,
+      filterMenu,
+    };
   };
 
   /**
@@ -190,17 +406,21 @@
     }
 
     const originalChildNodes = [...cellElement.childNodes];
-    const formattedLineSegments = formatLogEntries(parsedLogEntries);
+    const formattedLineSegments = formatLogEntries(parsedLogEntries, activeFilters);
     const formattedViewNode = buildFormattedView(formattedLineSegments);
+
+    const toolbarComponents = buildToolbar(cellElement);
 
     const cellViewState = {
       originalNodes: originalChildNodes,
       formattedNodes: [formattedViewNode],
-      toggleButton: buildToggleButton(cellElement),
+      parsedLogEntries,
+      ...toolbarComponents,
       isShowingFormatted: true,
     };
 
     viewStateByCell.set(cellElement, cellViewState);
+    formattedCells.add(cellElement);
     cellElement.classList.add(ACTIVE_CELL_CLASS);
     cellElement.setAttribute(PROCESSED_ATTRIBUTE, 'formatted');
     showView(cellElement, cellViewState, true);
@@ -236,12 +456,25 @@
     });
   };
 
-  if (typeof document !== 'undefined' && document.body) {
-    new MutationObserver(handleDomMutations).observe(document.body, {
-      childList: true,
-      subtree: true,
+  if (typeof document !== 'undefined') {
+    document.addEventListener('click', (clickEvent) => {
+      if (!clickEvent.target || !clickEvent.target.closest('.log-formatter__filter-wrapper')) {
+        document
+          .querySelectorAll('.log-formatter__filter-menu--open')
+          .forEach((openMenuElement) => {
+            openMenuElement.classList.remove('log-formatter__filter-menu--open');
+          });
+      }
     });
 
-    formatAllLogCells();
+    if (document.body) {
+      const mutationObserver = new MutationObserver(handleDomMutations);
+      mutationObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+
+      formatAllLogCells();
+    }
   }
 })();

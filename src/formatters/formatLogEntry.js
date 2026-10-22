@@ -9,6 +9,8 @@ const {
   formatTimestamp,
   isDateOrTimeOnly,
   isNumericArray,
+  pruneLogData,
+  shouldFilterValue,
 } = utilities;
 
 /**
@@ -26,40 +28,32 @@ const LOG_LEVEL = {
  * @param {string} segmentText - O conteúdo do texto.
  * @returns {{ bold: boolean, text: string }} Segmento para criação de elemento DOM.
  */
-const createTextSegment = (segmentText) => {
-  return {
-    bold: false,
-    text: String(segmentText ?? ''),
-  };
-};
+const createTextSegment = (segmentText) => ({
+  bold: false,
+  text: String(segmentText ?? ''),
+});
 
 /**
  * Cria um segmento de texto com estilo de fonte em negrito (identificadores e chaves).
  * @param {string} segmentText - O conteúdo do texto.
  * @returns {{ bold: boolean, text: string }} Segmento para criação de elemento DOM.
  */
-const createBoldSegment = (segmentText) => {
-  return {
-    bold: true,
-    text: String(segmentText ?? ''),
-  };
-};
+const createBoldSegment = (segmentText) => ({
+  bold: true,
+  text: String(segmentText ?? ''),
+});
 
 /**
  * Cria uma linha em branco para espaçamento vertical no layout.
  * @returns {Array<{ bold: boolean, text: string }>} Linha com segmento vazio.
  */
-const createEmptyLine = () => {
-  return [createTextSegment('')];
-};
+const createEmptyLine = () => [createTextSegment('')];
 
 /**
  * Cria uma linha separadora visual entre registros consecutivos.
  * @returns {Array<{ type: string, bold: boolean, text: string }>} Linha separadora estruturada.
  */
-const createSeparatorLine = () => {
-  return [{ type: 'separator', bold: false, text: '' }];
-};
+const createSeparatorLine = () => [{ type: 'separator', bold: false, text: '' }];
 
 /**
  * Renderiza um array preservando formato condensado para primitivos e hierárquico para objetos.
@@ -471,7 +465,7 @@ const parseRawLogText = (rawLogText) => {
  * @param {Object} logEntry - Objeto com os atributos do log do NestJS.
  * @returns {Array<Array<{ bold: boolean, text: string }>>} Linhas de segmentos formatadas.
  */
-const formatNestjsEntry = (logEntry) => {
+const formatNestjsEntry = (logEntry, activeFilters = {}) => {
   const formattedLines = [];
 
   const levelDescription =
@@ -500,8 +494,11 @@ const formatNestjsEntry = (logEntry) => {
 
     if (parsedJsonMessage !== undefined) {
       const expandedMessageData = parseNestedJson(parsedJsonMessage);
-      formattedLines.push([createBoldSegment('Mensagem:')]);
-      formattedLines.push(...renderComplexValue(expandedMessageData, '  '));
+      const cleanedMessageData = pruneLogData(expandedMessageData, activeFilters);
+      if (cleanedMessageData !== undefined) {
+        formattedLines.push([createBoldSegment('Mensagem:')]);
+        formattedLines.push(...renderComplexValue(cleanedMessageData, '  '));
+      }
     } else {
       formattedLines.push([createBoldSegment('Mensagem:')]);
       logEntry.message.split('\n').forEach((messageLine) => {
@@ -518,10 +515,7 @@ const formatNestjsEntry = (logEntry) => {
     sourceMetadataLines.push([createBoldSegment('file: '), createTextSegment(logEntry.source)]);
   }
   if (logEntry.traceId) {
-    sourceMetadataLines.push([
-      createBoldSegment('traceId: '),
-      createTextSegment(logEntry.traceId),
-    ]);
+    sourceMetadataLines.push([createBoldSegment('traceId: '), createTextSegment(logEntry.traceId)]);
   }
   if (logEntry.trace) {
     sourceMetadataLines.push([
@@ -542,20 +536,23 @@ const formatNestjsEntry = (logEntry) => {
   }
 
   if (logEntry.context && typeof logEntry.context === 'object') {
-    const contextEntries = Object.entries(logEntry.context).filter(([contextKey]) => {
-      return contextKey !== 'traceId';
-    });
-
-    if (contextEntries.length > 0) {
-      formattedLines.push(createEmptyLine(), [
-        createBoldSegment('Contexto da requisição recebida'),
-      ]);
-      contextEntries.forEach(([originalKey, contextValue]) => {
-        formattedLines.push([
-          createBoldSegment(`${originalKey}: `),
-          createTextSegment(String(contextValue ?? '')),
-        ]);
+    const cleanedContext = pruneLogData(logEntry.context, activeFilters);
+    if (cleanedContext && typeof cleanedContext === 'object') {
+      const contextEntries = Object.entries(cleanedContext).filter(([contextKey]) => {
+        return contextKey !== 'traceId';
       });
+
+      if (contextEntries.length > 0) {
+        formattedLines.push(createEmptyLine(), [
+          createBoldSegment('Contexto da requisição recebida'),
+        ]);
+        contextEntries.forEach(([originalKey, contextValue]) => {
+          formattedLines.push([
+            createBoldSegment(`${originalKey}: `),
+            createTextSegment(String(contextValue ?? '')),
+          ]);
+        });
+      }
     }
   }
 
@@ -608,9 +605,10 @@ const formatSkywalkingEntry = (logEntry) => {
  * Formata um registro do Filebeat / Kubernetes preservando as chaves originais.
  * Expande valores que contenham JSON aninhado via parseNestedJson e renderComplexValue.
  * @param {Object} logEntry - Registro com campos do Filebeat.
+ * @param {Object<string, boolean>} [activeFilters={}] - Mapa de filtros ativos.
  * @returns {Array<Array<{ bold: boolean, text: string }>>} Linhas formatadas.
  */
-const formatFilebeatEntry = (logEntry) => {
+const formatFilebeatEntry = (logEntry, activeFilters = {}) => {
   const rawLogLevel = logEntry.fields['log.level'] ?? logEntry.fields.level ?? '';
   const serviceName = logEntry.fields['service.name'] ?? '';
   const headerText = [
@@ -630,9 +628,16 @@ const formatFilebeatEntry = (logEntry) => {
     const parsedJsonCandidate = tryParseJson(propertyValue);
     if (parsedJsonCandidate !== undefined) {
       const expandedValue = parseNestedJson(parsedJsonCandidate);
-      formattedLines.push([createBoldSegment(`${originalKey}:`)]);
-      formattedLines.push(...renderComplexValue(expandedValue, '  '));
+      const cleanedValue = pruneLogData(expandedValue, activeFilters);
+      if (cleanedValue !== undefined) {
+        formattedLines.push([createBoldSegment(`${originalKey}:`)]);
+        formattedLines.push(...renderComplexValue(cleanedValue, '  '));
+      }
     } else {
+      if (shouldFilterValue && shouldFilterValue(propertyValue, activeFilters)) {
+        return;
+      }
+
       const stringifiedValue = String(propertyValue ?? '');
       if (stringifiedValue.includes('\n')) {
         formattedLines.push([createBoldSegment(`${originalKey}:`)]);
@@ -654,16 +659,17 @@ const formatFilebeatEntry = (logEntry) => {
 /**
  * Direciona o registro de log para o formatador apropriado com base em seu formato identificado.
  * @param {Object} logEntry - Registro de log a ser formatado.
+ * @param {Object<string, boolean>} [activeFilters={}] - Mapa de filtros ativos.
  * @returns {Array<Array<{ bold: boolean, text: string }>>} Linhas de segmentos formatadas.
  */
-const formatLogEntry = (logEntry) => {
+const formatLogEntry = (logEntry, activeFilters = {}) => {
   if (logEntry.format === 'nestjs') {
-    return formatNestjsEntry(logEntry);
+    return formatNestjsEntry(logEntry, activeFilters);
   }
   if (logEntry.format === 'skywalking') {
     return formatSkywalkingEntry(logEntry);
   }
-  return formatFilebeatEntry(logEntry);
+  return formatFilebeatEntry(logEntry, activeFilters);
 };
 
 /**
@@ -694,9 +700,10 @@ const groupEntriesByTraceId = (logEntries) => {
 /**
  * Formata um grupo de logs pertencentes ao mesmo traceId.
  * @param {[string, Array<Object>]} traceGroupTuple - Tupla com o traceId e lista de logs.
+ * @param {Object<string, boolean>} [activeFilters={}] - Mapa de filtros ativos.
  * @returns {Array<Array<{ bold: boolean, text: string }>>} Linhas formatadas com o título do grupo.
  */
-const formatTraceGroup = ([traceIdentifier, groupEntries]) => {
+const formatTraceGroup = ([traceIdentifier, groupEntries], activeFilters = {}) => {
   const groupTitle =
     traceIdentifier === 'sem-traceId'
       ? `${groupEntries.length} registro(s)`
@@ -708,7 +715,7 @@ const formatTraceGroup = ([traceIdentifier, groupEntries]) => {
     if (entryIndex > 0) {
       renderedGroupLines.push(createSeparatorLine());
     }
-    const singleEntryLines = formatLogEntry(logEntry);
+    const singleEntryLines = formatLogEntry(logEntry, activeFilters);
     const orderPrefix =
       groupEntries.length > 1 ? `(${entryIndex + 1}/${groupEntries.length}) ` : '';
     const firstLineSegments = singleEntryLines[0] ?? [createTextSegment('')];
@@ -724,16 +731,17 @@ const formatTraceGroup = ([traceIdentifier, groupEntries]) => {
 /**
  * Formata um array de entradas de log agrupando-as por traceId.
  * @param {Array<Object>} logEntries - As entradas de log a serem formatadas.
+ * @param {Object<string, boolean>} [activeFilters={}] - Mapa de filtros ativos.
  * @returns {Array<Array<{ bold: boolean, text: string }>>} As entradas de log formatadas prontas para renderização.
  */
-const formatLogEntries = (logEntries) => {
+const formatLogEntries = (logEntries, activeFilters = {}) => {
   const renderedOutput = [];
 
   groupEntriesByTraceId(logEntries).forEach((logGroup, groupIndex) => {
     if (groupIndex > 0) {
       renderedOutput.push(createEmptyLine(), createEmptyLine());
     }
-    renderedOutput.push(...formatTraceGroup(logGroup));
+    renderedOutput.push(...formatTraceGroup(logGroup, activeFilters));
   });
 
   return renderedOutput;
