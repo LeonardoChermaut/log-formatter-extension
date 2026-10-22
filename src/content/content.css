@@ -1,5 +1,16 @@
+/* Garante alinhamento no topo da célula da tabela no Kibana quando linhas/colunas adjacentes tiverem alturas diferentes */
+[data-test-subj='docTableRow'] > [data-test-subj='docTableField']:has(.log-formatter-cell),
+td:has(.log-formatter-cell) {
+  vertical-align: top !important;
+}
+
 /* Libera a altura e quebras de linha das células de log formatadas no Discover do Kibana */
 .truncate-by-height.log-formatter-cell {
+  display: block !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  position: relative !important;
+  text-align: left !important;
   white-space: pre-wrap !important;
   overflow-wrap: anywhere !important;
   word-break: normal !important;
@@ -80,6 +91,8 @@
 .log-formatter__toolbar {
   float: right;
   margin: 0 0 6px 10px;
+  margin-left: auto;
+  align-self: flex-start;
   display: inline-flex;
   align-items: center;
   gap: 6px;
