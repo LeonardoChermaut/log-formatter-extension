@@ -11,6 +11,7 @@ Extensão para navegadores Chromium (Google Chrome, Microsoft Edge, Brave, etc.)
 - **Ocultação de buffers numéricos**: Arrays compostos apenas por números (como bytes/buffers brutos) são recolhidos de forma compacta para evitar poluição visual.
 - **Preservação da coluna de data/hora**: A coluna de tempo do Kibana não é modificada e não recebe botões indesejados.
 - **Alternância rápida**: Botão **"Ver original"** / **"Ver formatado"** em cada célula para alternar a qualquer momento.
+- **Filtros de campos vazios**: Menu dropdown para ocultar valores nulos, strings vazias, `false`, arrays vazios e objetos vazios **apenas em estruturas aninhadas** (message, context, Filebeat fields) - nunca remove campos principais como message, trace, stack, error.
 
 ---
 
@@ -47,7 +48,8 @@ Coloque-a para "fixar" ou "favoritar" pra sempre estar visível no navegador.
    https://kibana.eks.tools.fastshopdigital.com/*
    ```
 2. As células de log serão automaticamente organizadas e formatadas.
-3. Se quiser conferir o texto bruto original de qualquer log, só clicar no botão **"Ver original"** . Para voltar à visualização limpa, clique em **"Ver formatado"**.
+3. Se quiser conferir o texto bruto original de qualquer log, só clicar no botão **"Ver original"**. Para voltar à visualização limpa, clique em **"Ver formatado"**.
+4. Use o botão **"Filtros"** para ocultar campos vazios em estruturas aninhadas.
 
 ---
 
@@ -70,12 +72,123 @@ log-formatter-extension/
 ├── package.json               # Dependências e scripts npm
 ├── eslint.config.mjs          # Regras e linting do ESLint
 ├── .prettierrc                # Regras de formatação de código
+├── AGENTS.md                  # Guia para agentes de IA
+├── commit.md                  # Histórico de mudanças (convenção git)
+├── planning.md                # Análise de arquitetura e plano de refatoração
 ├── src/
-│   ├── content/               # Content scripts injetados na página
-│   │   ├── content.js         # Observador DOM e controle de UI da tabela
-│   │   └── content.css        # Estilos aplicados no Kibana
-│   ├── formatters/            # Motores de análise e formatação de logs
-│   │   └── formatLogEntry.js  # Parser e formatador estrutural de logs
-│   └── utils/                 # Funções utilitárias reutilizáveis
-│       └── utilities.js       # JSON parsing/repair, datas, etc.
+│   ├── content.css            # Estilos aplicados no Kibana
+│   ├── core/                  # Tipos e constantes compartilhadas
+│   │   ├── constants.js       # LOG_LEVEL, seletores, labels, storage keys
+│   │   └── types.js           # Tipos TypeScript/JSDoc compartilhados
+│   ├── parsing/               # Camada de parsing (texto bruto → estruturado)
+│   │   ├── detectFormat.js    # Detecção de formato (NestJS, Skywalking, Filebeat)
+│   │   ├── parseNestjs.js     # Parser NestJS (util.inspect)
+│   │   ├── parseSkywalking.js # Parser Skywalking
+│   │   ├── parseFilebeat.js   # Parser Filebeat/Kubernetes
+│   │   ├── parseInspect.js    # Parser util.inspect (objetos, context, trace)
+│   │   └── index.js           # Orquestrador parseRawLogText
+│   ├── formatting/            # Camada de formatação (estruturado → segmentos)
+│   │   ├── renderSegments.js  # Primitivas: createTextSegment, createBoldSegment, createEmptyLine
+│   │   ├── renderValue.js     # Render hierárquico: renderComplexValue, renderArrayValue, renderObjectValue
+│   │   ├── formatNestjs.js    # Formatter NestJS
+│   │   ├── formatSkywalking.js # Formatter Skywalking
+│   │   ├── formatFilebeat.js  # Formatter Filebeat
+│   │   ├── groupByTrace.js    # Agrupamento por traceId + ordenação temporal
+│   │   └── index.js           # Dispatcher formatLogEntry + formatLogEntries
+│   ├── json/                  # Utilitários JSON puros (sem side effects)
+│   │   ├── repair.js          # tryParseJson (reparo JSON truncado do Kibana)
+│   │   ├── expand.js          # parseNestedJson (expansão recursiva JSON strings)
+│   │   └── escape.js          # unescapeJavaScriptString (\n, \t, etc.)
+│   ├── filters/               # Sistema de filtros (estado + lógica + persistência)
+│   │   ├── definitions.js     # FILTER_DEFINITIONS, DEFAULT_FILTER_OPTIONS, FILTER_STORAGE_KEY
+│   │   ├── engine.js          # shouldFilterValue, pruneLogData
+│   │   └── storage.js         # loadFilterPreferences, saveFilterPreferences (localStorage)
+│   ├── ui/                    # Camada de UI (DOM + interação)
+│   │   ├── buildSegments.js   # buildSegmentSpan, buildLineElement, buildFormattedView
+│   │   ├── toolbar.js         # buildToolbar, buildFilterDropdown
+│   │   ├── filterSync.js      # syncFilterMenuCheckboxes, getFilterButtonLabel
+│   │   ├── cellState.js       # cellViews (WeakMap), trackedCells (Set), showView, updateAllCells
+│   │   └── content.js         # Entry point: MutationObserver, formatCell, formatAllLogCells
+│   └── utils/                 # Helpers genuínamente genéricos
+│       ├── date.js            # formatTimestamp (pt-BR, São Paulo), isDateOrTimeOnly
+│       └── typeGuards.js      # isNumericArray, isEmpty*, isNullOrUndefined, isFalse
+```
+
+---
+
+## Arquitetura em Camadas
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        UI Layer                             │
+│  content.js → MutationObserver → formatCell → buildToolbar │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     Formatting Layer                        │
+│  formatNestjs / formatSkywalking / formatFilebeat           │
+│  groupByTrace → formatLogEntries                            │
+│  renderValue → renderComplexValue → renderArray/Object      │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       Parsing Layer                         │
+│  parseRawLogText → detectFormat → parseNestjs/Sky/Filebeat  │
+│  parseInspect → parseMessageLiteral, parseContextLiteral    │
+│  parseInspectObject (util.inspect output)                   │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+           ┌───────────────┼───────────────┐
+           ▼               ▼               ▼
+      ┌─────────┐    ┌────────────┐  ┌──────────┐
+      │  json/  │    │  filters/  │  │  utils/  │
+      │ repair  │    │ engine     │  │ date     │
+      │ expand  │    │ storage    │  │ typeGuard│
+      │ escape  │    │ definitions│  │          │
+      └─────────┘    └────────────┘  └──────────┘
+```
+
+---
+
+## Formatos de Log Suportados
+
+1. **NestJS** (output `util.inspect`): `{ timestamp: '...', message: '...', context: Map(...) }`
+2. **Skywalking**: `file: '...', level: '...', message: '...'`
+3. **Filebeat/Kubernetes**: `key: value` por linha
+
+---
+
+## Lógica de Parsing Crítica
+
+- `parseMessageLiteral` - Suporta `'single'`, `"double"`, `` `backtick` `` quoted strings
+- `parseContextLiteral` - Extrai entradas `Map` (`'key' => value`) e campos de objeto
+- `parseInspectObject` - Parser recursivo para objetos aninhados em `trace`, `errorResponse`, valores do context
+- `tryParseJson` - Repara JSON truncado (comum no Kibana por limites de caracteres)
+- `parseNestedJson` - Expande recursivamente strings JSON dentro de objetos/arrays
+- `renderComplexValue` - Renderiza objetos/arrays hierarquicamente com chaves em negrito
+
+---
+
+## Desenvolvimento
+
+### Comandos
+
+```bash
+npm run lint          # ESLint check
+npm run lint:fix      # ESLint auto-fix
+npm run format        # Prettier write
+npm run format:check  # Prettier check
+```
+
+**Ordem obrigatória antes de commit:** `lint` → `format:check` (husky pre-commit roda lint-staged)
+
+### Scripts de Validação (tlc-spec-driven)
+
+```bash
+python .opencode/tlc-spec-driven/scripts/validate_spec.py <feature>
+python .opencode/tlc-spec-driven/scripts/validate_tasks.py <feature>
+python .opencode/tlc-spec-driven/scripts/check_commit.py --message "<msg>"
+python .opencode/tlc-spec-driven/scripts/validate_state.py <feature>
 ```
