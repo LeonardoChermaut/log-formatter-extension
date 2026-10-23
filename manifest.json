@@ -7,11 +7,36 @@
     {
       "matches": ["https://kibana.eks.tools.fastshopdigital.com/*"],
       "js": [
-        "src/utils/utilities.js",
-        "src/formatters/formatLogEntry.js",
-        "src/content/content.js"
+        "src/core/constants.js",
+        "src/core/types.js",
+        "src/json/repair.js",
+        "src/json/expand.js",
+        "src/json/escape.js",
+        "src/utils/date.js",
+        "src/utils/typeGuards.js",
+        "src/filters/definitions.js",
+        "src/filters/engine.js",
+        "src/filters/storage.js",
+        "src/parsing/detectFormat.js",
+        "src/parsing/parseInspect.js",
+        "src/parsing/parseNestjs.js",
+        "src/parsing/parseSkywalking.js",
+        "src/parsing/parseFilebeat.js",
+        "src/parsing/index.js",
+        "src/formatting/renderSegments.js",
+        "src/formatting/renderValue.js",
+        "src/formatting/formatNestjs.js",
+        "src/formatting/formatSkywalking.js",
+        "src/formatting/formatFilebeat.js",
+        "src/formatting/groupByTrace.js",
+        "src/formatting/index.js",
+        "src/ui/buildSegments.js",
+        "src/ui/filterSync.js",
+        "src/ui/cellState.js",
+        "src/ui/toolbar.js",
+        "src/ui/content.js"
       ],
-      "css": ["src/content/content.css"],
+      "css": ["src/content.css"],
       "run_at": "document_idle"
     }
   ]
