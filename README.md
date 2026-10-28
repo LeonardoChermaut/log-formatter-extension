@@ -183,12 +183,3 @@ npm run format:check  # Prettier check
 ```
 
 **Ordem obrigatória antes de commit:** `lint` → `format:check` (husky pre-commit roda lint-staged)
-
-### Scripts de Validação (tlc-spec-driven)
-
-```bash
-python .opencode/tlc-spec-driven/scripts/validate_spec.py <feature>
-python .opencode/tlc-spec-driven/scripts/validate_tasks.py <feature>
-python .opencode/tlc-spec-driven/scripts/check_commit.py --message "<msg>"
-python .opencode/tlc-spec-driven/scripts/validate_state.py <feature>
-```
