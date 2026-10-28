@@ -66,7 +66,15 @@
    */
   const formatCell = (cellElement) => {
     const currentProcessingStatus = cellElement.getAttribute(PROCESSED_ATTRIBUTE);
-    if (currentProcessingStatus === 'formatted' || currentProcessingStatus === 'skipped') {
+    if (currentProcessingStatus === 'formatted') {
+      const hasFormattedView = cellElement.querySelector('.log-formatter');
+      const hasToolbar = cellElement.querySelector('.log-formatter__toolbar');
+      if (hasFormattedView && hasToolbar) {
+        return;
+      }
+      cellElement.removeAttribute(PROCESSED_ATTRIBUTE);
+      cellElement.classList.remove(ACTIVE_CELL_CLASS);
+    } else if (currentProcessingStatus === 'skipped') {
       return;
     }
 
