@@ -67,9 +67,11 @@
   const formatCell = (cellElement) => {
     const currentProcessingStatus = cellElement.getAttribute(PROCESSED_ATTRIBUTE);
     if (currentProcessingStatus === 'formatted') {
-      const hasFormattedView = cellElement.querySelector('.log-formatter');
+      const cellViewState = cellViews.get(cellElement);
       const hasToolbar = cellElement.querySelector('.log-formatter__toolbar');
-      if (hasFormattedView && hasToolbar) {
+      const isOurUiAttached =
+        hasToolbar && (!cellViewState || cellElement.contains(cellViewState.toolbarElement));
+      if (isOurUiAttached) {
         return;
       }
       cellElement.removeAttribute(PROCESSED_ATTRIBUTE);
