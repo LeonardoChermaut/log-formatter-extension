@@ -56,8 +56,7 @@
       const parsedJsonMessage = tryParseJson(logEntry.message);
 
       if (parsedJsonMessage !== undefined) {
-        const expandedMessageData = parseNestedJson(parsedJsonMessage);
-        // Apply pruning to nested JSON in message (not top-level message)
+        const expandedMessageData = parseNestedJson(parsedJsonMessagage)
         const prunedMessageData = pruneLogData(expandedMessageData, activeFilters);
         if (prunedMessageData !== undefined) {
           formattedLines.push([createBoldSegment('Mensagem:')]);
@@ -116,7 +115,6 @@
         ]);
         contextEntries.forEach(([originalKey, contextValue]) => {
           if (contextValue !== null && typeof contextValue === 'object') {
-            // Apply pruning to nested objects in context
             const prunedContextValue = pruneLogData(contextValue, activeFilters);
             if (prunedContextValue !== undefined) {
               formattedLines.push([createBoldSegment(`${originalKey}:`)]);

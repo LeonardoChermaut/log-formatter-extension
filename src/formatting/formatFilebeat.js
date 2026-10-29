@@ -45,7 +45,6 @@
       const parsedJsonCandidate = tryParseJson(propertyValue);
       if (parsedJsonCandidate !== undefined) {
         const expandedValue = parseNestedJson(parsedJsonCandidate);
-        // Apply pruning to nested JSON in Filebeat fields
         const prunedValue = pruneLogData(expandedValue, activeFilters);
         if (prunedValue !== undefined) {
           formattedLines.push([createBoldSegment(`${originalKey}:`)]);
