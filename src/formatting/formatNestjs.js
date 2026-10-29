@@ -56,7 +56,7 @@
       const parsedJsonMessage = tryParseJson(logEntry.message);
 
       if (parsedJsonMessage !== undefined) {
-        const expandedMessageData = parseNestedJson(parsedJsonMessagage)
+        const expandedMessageData = parseNestedJson(parsedJsonMessagage);
         const prunedMessageData = pruneLogData(expandedMessageData, activeFilters);
         if (prunedMessageData !== undefined) {
           formattedLines.push([createBoldSegment('Mensagem:')]);
